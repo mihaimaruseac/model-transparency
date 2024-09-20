@@ -12,4 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""TODO: Write some long documentation here, documenting public API."""
+
 __version__ = "0.0.2-alpha"
