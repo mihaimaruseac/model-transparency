@@ -23,65 +23,134 @@ from collections.abc import Iterable
 import pathlib
 from typing import Self
 
+from model_signing.manifest import manifest
 from model_signing.serialization import serialization
 from model_signing.serialization import serialize_by_file
 
 
-def sign(model_path: str | pathlib.Path):
-    """Signs a model using the default configuration.
+# TODO: use PathLike!!
+def hash(model_path: str | pathlib.Path) -> manifest.Manifest:
+    """Hashes a model using the default configuration.
+
+    Hashing is the common part of signing and signature verification. It is
+    extracted to a separate method for reuse and to enable benchmarking, since
+    this is the part that takes most of the time when performing signing.
+
+    Since we need to be flexible on the serialization format, this returns a
+    manifest, instead of just a single digest. The type of returned manifest
+    depends on the configuration.
 
     Args:
-        model_path: the path to the model to sign.
+        model_path: the path to the model to hash.
+
+    Returns:
+        A manifest that represents hashes for the model.
     """
-    SigningConfig().sign(model_path)
+    return HashingConfig().hash(model_path)
 
 
-def verify():
-    """Verifies the signature for a model."""
-    pass  # TODO
+class HashingConfig:
+    """Configuration to use when hashing models.
 
+    To be flexible, we don't directly compute a single digest for the model.
+    Instead, we serialize the model to a manifest representation -- a pairing
+    between model components and their corresponding hashes. A manifest could be
+    a single digest for the entire model, a record of all files with their
+    associated digests, a record of file shards with their associated digests or
+    any other supported configuration.  It is also possible to have manifests of
+    a mixed granularity, if the library supports them. Consult each individual
+    method in this class to determine the type of the manifest being used.
 
-class SigningConfig:
-    """Configuration to use when signing models.
+    For a hashing configuration we need to establish the manifest type (as
+    mentioned in the previous paragraph) and the hashing algorithm used to hash
+    individual objects in the manifest. If a serialization method needs
+    additional hashing methods, they are configured in the corresponding setter.
 
-    We need to configure:
-      - signer to use: Sigstore, PKI, etc.
-      - signature format: in-toto (multiple formats), digest, etc.
-      - serialization method: converting from a model to a `manifest.Manifest`
-      - hashing algorithms
+    We also need to configure the list of files from within the model directory
+    that should be ignored (if any). This is useful to skip hashing files that
+    don't impact model behavior, as a minor performance gain.
 
-    All of these have a default value, but users can use the `set_*` methods to
-    select other options that are supported by the library.
+    The default hashing configuration uses SHA256 to compute the digest of every
+    file in the model. The resulting manifest is a listing of files paired with
+    their hashes. By default, no file is ignored.
+
+    Users can use the `set_*` methods to select other options that are supported
+    by the library.
     """
 
     def __init__(self):
-        """Initializes the default configuration for signing."""
+        """Initializes the default configuration for hashing."""
         self._ignored_paths = frozenset()
-        self._serializer = seri
+        pass
 
-    def sign(self, model_path: str | pathlib.Path):
-        """Signs a model using the current configuration.
-
-        Args:
-            model_path: the path to the model to sign.
-        """
+    def hash(self, model_path: str | pathlib.Path) -> manifest.Manifest:
+        """Hashes a model using the current configuration."""
         model_path = pathlib.Path(model_path)
-
-        # TODO: rest of signing
+        raise ValueError("yadda yadda")
 
     def set_ignored_paths(
         self, paths: Iterable[str | pathlib.Path] = frozenset()
     ) -> Self:
         """Configures the paths to be ignored during serialization of a model.
 
-        If a path is a directory, itself and all of its children will be
-        ignored.
+        If the model is a single file, there are no paths that are ignored. If
+        the model is a directory, all paths must be within the model directory.
+        If a path to be ignored is absolute, we convert it to a path within the
+        model directory during serialization. If the path is relative, it is
+        assumed to be relative to the model root.
+
+        If a path is a directory, serialization will ignore both the path and
+        any of its children.
 
         Args:
             paths: the paths to ignore
 
         Returns:
-            The current instance, to support chaining configuration methods.
+            The new hashing configuration with a new set of ignored paths.
         """
         self._ignored_paths = frozenset({pathlib.Path(p) for p in paths})
         return self
+
+
+#def sign(model_path: str | pathlib.Path):
+#    """Signs a model using the default configuration.
+#
+#    Args:
+#        model_path: the path to the model to sign.
+#    """
+#    SigningConfig().sign(model_path)
+#
+#
+#def verify():
+#    """Verifies the signature for a model."""
+#    pass  # TODO
+#
+#
+#class SigningConfig:
+#    """Configuration to use when signing models.
+#
+#    We need to configure:
+#      - signer to use: Sigstore, PKI, etc.
+#      - signature format: in-toto (multiple formats), digest, etc.
+#      - serialization method: converting from a model to a `manifest.Manifest`
+#      - hashing algorithms
+#
+#    All of these have a default value, but users can use the `set_*` methods to
+#    select other options that are supported by the library.
+#    """
+#
+#    def __init__(self):
+#        """Initializes the default configuration for signing."""
+#        self._ignored_paths = frozenset()
+#        self._serializer = seri
+#
+#    def sign(self, model_path: str | pathlib.Path):
+#        """Signs a model using the current configuration.
+#
+#        Args:
+#            model_path: the path to the model to sign.
+#        """
+#        model_path = pathlib.Path(model_path)
+#
+#        # TODO: rest of signing
+#
