@@ -21,23 +21,49 @@ markdown heading sizes indicating the next outer layer wrapping.
 
 ##### In-Toto Statement
 
-The innermost layer i.e. the manifest layer itself, uses the [In-Toto
-Attestation Framework](https://github.com/in-toto/attestation) and specifically
-uses the [In-Toto
-Statement](https://github.com/in-toto/attestation/blob/80e7efeca762e8276ed5e04e6d8bc796a4a19170/spec/v1/statement.md)
-attestation layer where each subject is a
-[ResourceDescriptor](https://github.com/in-toto/attestation/blob/80e7efeca762e8276ed5e04e6d8bc796a4a19170/spec/v1/resource_descriptor.md)
-field made up of `path:hash` entries, one per file. The main reason currently
-for choosing In-Toto as the payload type of the DSSE Envelope is simply because
-it is what is currently supported by the
-[sigstore-python](https://github.com/sigstore/sigstore-python) library. That is,
-the
-[`sign_dsse`](https://github.com/sigstore/sigstore-python/blob/343cbbf46e15160a6c483b24bb316ef20f2341d5/sigstore/sign.py#L197)
-API takes a
-[`dsse.Statement`](https://github.com/sigstore/sigstore-python/blob/8578b545c2f8949211a185e5cf0ece7c17030a7a/sigstore/dsse.py#L81),
-which represents an In-Toto Statement. See [sigstore-python issue
+The innermost layer, the manifest itself, uses the [In-Toto Attestation
+Framework](https://github.com/in-toto/attestation) and specifically the [In-Toto
+Statement](https://github.com/in-toto/attestation/blob/main/spec/v1/statement.md)
+format.
+
+The statement has the following key components relevant to model signing:
+
+*   **`subject`**: Contains a single entry representing the overall model.
+    *   `name`: The name of the model (typically the directory name).
+    *   `digest`: A dictionary containing a single `sha256` entry. This value is
+        a consolidated hash calculated over the digests of all individual
+        resources listed in the predicate, ensuring the integrity of the entire
+        set.
+*   **`predicateType`**: Set to `https://model_signing/signature/v1.0`,
+    indicating the specific structure and semantics of the `predicate` field used
+    for this model signature.
+*   **`predicate`**: Contains the detailed information about the model's
+    components and how the manifest was generated.
+    *   **`serialization`**: An object describing the method used to serialize
+        the model into the manifest. This is crucial for verifying the signature
+        correctly, as it specifies how the `resources` were identified and
+        hashed. It includes:
+        *   `method`: The serialization method used (e.g., "files").
+        *   `hash_type`: The hashing algorithm applied to each resource (e.g.,
+            "sha256").
+        *   Additional options relevant to the method (e.g., `allow_symlinks`:
+            true/false).
+    *   **`resources`**: A list of objects, each representing an individual
+        component (file, shard, etc.) of the model. Each object contains:
+        *   `name`: The identifier (e.g., file path) of the component.
+        *   `algorithm`: The hashing algorithm used for this specific component.
+        *   `digest`: The resulting hash digest (hex-encoded) of the component.
+
+This structure allows the signature to bind the overall model identity (via the
+subject's digest) to the specific details of its constituent parts and the exact
+method used to generate their hashes, ensuring both integrity and
+reproducibility.
+
+The reason for choosing In-Toto as the payload type within the DSSE Envelope is
+its support by the [sigstore-python](https://github.com/sigstore/sigstore-python)
+library's signing APIs. See [sigstore-python issue
 #982](https://github.com/sigstore/sigstore-python/issues/982) for tracking the
-support for DSSE signatures over binary payloads.
+support for DSSE signatures over arbitrary binary payloads.
 
 #### DSSE Envelope
 
@@ -65,6 +91,16 @@ API from the [sigstore-python](https://github.com/sigstore/sigstore-python)
 library after passing it an In-Toto Statement. This API will sign the statement,
 producing a DSSE envelope, along with a DSSE log entry that is submitted to the
 transparency log.
+
+> [!NOTE]
+> The following example shows a complete Sigstore bundle. While the
+> *decoded* DSSE payload (`dsseEnvelope.payload`) accurately reflects the
+> structure described in the "In-Toto Statement" section above (using
+> `predicateType: https://model_signing/signature/v1.0`), the surrounding
+> Sigstore Bundle elements (like the base64-encoded payload string, verification
+> material, and signatures) are illustrative. They may not perfectly match the
+> decoded payload shown, as generating a fully consistent and verifiable signed
+> bundle requires the actual signing process.
 
 ## Example Format
 
@@ -117,7 +153,7 @@ $ cat model.sig | jq .
     ]
   },
   "dsseEnvelope": {
-    "payload": "ewogICJfdHlwZSI6ICJodHRwczovL2luLXRvdG8uaW8vU3RhdGVtZW50L3YxIiwKICAic3ViamVjdCI6IFsKICAgIHsKICAgICAgIm5hbWUiOiAiLmdpdGF0dHJpYnV0ZXMiLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiMTFhZDdlZmEyNDk3NWVlNGIwYzNjM2EzOGVkMTg3MzdmMDY1OGE1Zjc1YTBhOTY3ODdiNTc2YTc4YTAyMzM2MSIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogIlJFQURNRS5tZCIsCiAgICAgICJkaWdlc3QiOiB7CiAgICAgICAgInNoYTI1NiI6ICJmYTE2NjkyMmNjYTYyY2Q4YWNkZDU0ZDE5NjRhYmU5MWQxYjU4Y2ZiOWFmZDZlNGM1OTljYjA5OTEyZDlhOWY5IgogICAgICB9LAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImFjdHVhbF9oYXNoX2FsZ29yaXRobSI6ICJmaWxlLXNoYTI1NiIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm5hbWUiOiAiY29uZmlnLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiYmRjMjY1YzJlNzlmMWM2YjZjMGY0ZjI1MzEzZTBkMWNjOTM2ZTBmZDRlMWUwODJiYjI2ZjY1YTRiZDBmYTU1NyIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogImdlbmVyYXRpb25fY29uZmlnLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiZTUzYTQ2MzNjOTkyMzNhNjUwMjViODY5YjFlMGZjNTc0N2E3MzdkMzlkNTdmNmE0MGE3OGE2NGE1NzBkMzYyOCIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogIm1vZGVsLTAwMDAxLW9mLTAwMDAyLnNhZmV0ZW5zb3JzIiwKICAgICAgImRpZ2VzdCI6IHsKICAgICAgICAic2hhMjU2IjogIjcxMjc0MzJmMWZmZmY1YjI1ODc1Y2U0ZTI4N2M5ZGZhNDU4NjU1YWQxYjYxODNhMmQyNzRjMDYxYmY5ZTRiMWIiCiAgICAgIH0sCiAgICAgICJhbm5vdGF0aW9ucyI6IHsKICAgICAgICAiYWN0dWFsX2hhc2hfYWxnb3JpdGhtIjogImZpbGUtc2hhMjU2IgogICAgICB9CiAgICB9LAogICAgewogICAgICAibmFtZSI6ICJtb2RlbC0wMDAwMi1vZi0wMDAwMi5zYWZldGVuc29ycyIsCiAgICAgICJkaWdlc3QiOiB7CiAgICAgICAgInNoYTI1NiI6ICIzNDRhMDNiYjI2ZmUxN2JhY2FjNjNiNjE2YzQ1Mzk3NzU4YWViNmRmYjBmMzZiNDQ5NTEzOWRjNDUzMGI4ODViIgogICAgICB9LAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImFjdHVhbF9oYXNoX2FsZ29yaXRobSI6ICJmaWxlLXNoYTI1NiIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm5hbWUiOiAibW9kZWwuc2FmZXRlbnNvcnMuaW5kZXguanNvbiIsCiAgICAgICJkaWdlc3QiOiB7CiAgICAgICAgInNoYTI1NiI6ICJiY2QxYWMyN2NlOGM3ODRmNjgyYTcwMmUwNDk5YmM5ZTRlNzNjMjIwMGJkMzRkMmNlZDJmZTJjZTE3YTExMzJiIgogICAgICB9LAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImFjdHVhbF9oYXNoX2FsZ29yaXRobSI6ICJmaWxlLXNoYTI1NiIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm5hbWUiOiAic3BlY2lhbF90b2tlbnNfbWFwLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiMmYyYmJhNDUxNDZmMDczYTdiOGEwOTdjYjYxMzNhNmI0YjY2ZDU3NTFlNzNmMmEyYWNhODEwODMyODg4MTNlOSIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogInRva2VuaXplci5qc29uIiwKICAgICAgImRpZ2VzdCI6IHsKICAgICAgICAic2hhMjU2IjogIjlhZjA3YTMxMjNhMWY0ZDc1ZGNiODVmYmRjNGM2MmY5Yjc4NzNkMjNmYTM5YzQ0OWQyMjQwYzNlMzNlYjNhYjUiCiAgICAgIH0sCiAgICAgICJhbm5vdGF0aW9ucyI6IHsKICAgICAgICAiYWN0dWFsX2hhc2hfYWxnb3JpdGhtIjogImZpbGUtc2hhMjU2IgogICAgICB9CiAgICB9LAogICAgewogICAgICAibmFtZSI6ICJ0b2tlbml6ZXJfY29uZmlnLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiMDc2NGQzYWUzODMwMTg3ZjYzY2ZlNTY4Yzc1NGQ5OTkwMGZlZDg1ZmM5ZDA3MWU2Y2ZlMmFkZDlmNTU1YjZiYiIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0KICBdLAogICJwcmVkaWNhdGVUeXBlIjogImh0dHBzOi8vbW9kZWxfc2lnbmluZy9EaWdlc3RzL3YwLjEiLAogICJwcmVkaWNhdGUiOiB7CiAgICAidW51c2VkIjogIlVudXNlZCwganVzdCBwYXNzZWQgZHVlIHRvIEFQSSByZXF1aXJlbWVudHMiCiAgfQp9",
+    "payload": "ewogICJfdHlwZSI6ICJodHRwczovL2luLXRvdG8uaW8vU3RhdGVtZW50L3YxIiwKICAic3ViamVjdCI6IFsKICAgIHsKICAgICAgIm5hbWUiOiAiLmdpdGF0dHJpYnV0ZXMiLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiMTFhZDdlZmEyNDk3NWVlNGIwYzNjM2EzOGVkMTg3MzdmMDY1OGE1Zjc1YTBhOTY3ODdiNTc2YTc4YTAyMzM2MSIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogIlJFQURNRS5tZCIsCiAgICAgICJkaWdlc3QiOiB7CiAgICAgICAgInNoYTI1NiI6ICJmYTE2NjkyMmNjYTYyY2Q4YWNkZDU0ZDE5NjRhYmU5MWQxYjU4Y2ZiOWFmZDZlNGM1OTljYjA5OTEyZDlhOWY5IgogICAgICB9LAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImFjdHVhbF9oYXNoX2FsZ29yaXRobSI6ICJmaWxlLXNoYTI1NiIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm5hbWUiOiAiY29uZmlnLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiYmRjMjY1YzJlNzlmMWM2YjZjMGY0ZjI1MzEzZTBkMWNjOTM2ZTBmZDRlMWUwODJiYjI2ZjY1YTRiZDBmYTU1NyIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogImdlbmVyYXRpb25fY29uZmlnLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiZTUzYTQ2MzNjOTkyMzNhNjUwMjViODY5YjFlMGZjNTc0N2E3MzdkMzlkNTdmNmE0MGE3OGE2NGE1NzBkMzYyOCIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogIm1vZGVsLTAwMDAxLW9mLTAwMDAyLnNhZmV0ZW5zb3JzIiwKICAgICAgImRpZ2VzdCI6IHsKICAgICAgICAic2hhMjU2IjogIjcxMjc0MzJmMWZmZmY1YjI1ODc1Y2U0ZTI4N2M5ZGZhNDU4NjU1YWQxYjYxODNhMmQyNzRjMDYxYmY5ZTRiMWIiCiAgICAgIH0sCiAgICAgICJhbm5vdGF0aW9ucyI6IHsKICAgICAgICAiYWN0dWFsX2hhc2hfYWxnb3JpdGhtIjogImZpbGUtc2hhMjU2IgogICAgICB9CiAgICB9LAogICAgewogICAgICAibmFtZSI6ICJtb2RlbC0wMDAwMi1vZi0wMDAwMi5zYWZldGVuc29ycyIsCiAgICAgICJkaWdlc3QiOiB7CiAgICAgICAgInNoYTI1NiI6ICIzNDRhMDNiYjI2ZmUxN2JhY2FjNjNiNjE2YzQ1Mzk3NzU4YWViNmRmYjBmMzZiNDQ5NTEzOWRjNDUzMGI4ODViIgogICAgICB9LAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImFjdHVhbF9oYXNoX2FsZ29yaXRobSI6ICJmaWxlLXNoYTI1NiIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm5hbWUiOiAibW9kZWwuc2FmZXRlbnNvcnMuaW5kZXguanNvbiIsCiAgICAgICJkaWdlc3QiOiB7CiAgICAgICAgInNoYTI1NiI6ICJiY2QxYWMyN2NlOGM3ODRmNjgyYTcwMmUwNDk5YmM5ZTRlNzNjMjIwMGJkMzRkMmNlZDJmZTJjZTE3YTExMzJiIgogICAgICB9LAogICAgICAiYW5ub3RhdGlvbnMiOiB7CiAgICAgICAgImFjdHVhbF9oYXNoX2FsZ29yaXRobSI6ICJmaWxlLXNoYTI1NiIKICAgICAgfQogICAgfSwKICAgIHsKICAgICAgIm5hbWUiOiAic3BlY2lhbF90b2tlbnNfbWFwLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiMmYyYmJhNDUxNDZmMDczYTdiOGEwOTdjYjYxMzNhNmI0YjY2ZDU3NTFlNzNmMmEyYWNhODEwODMyODg4MTNlOSIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogInRva2VuaXplci5qc29uIiwKICAgICAgImRpZ2VzdCI6IHsKICAgICAgICAic2hhMjU2IjogIjlhZjA3YTMxMjNhMWY0ZDc1ZGNiODVmYmRjNGM2MmY5Yjc4NzNkMjNmYTM5YzQ0OWQyMjQwYzNlMzNlYjNhYjUiCiAgICAgIH0sCiAgICAgICJhbm5vdGF0aW9ucyI6IHsKICAgICAgICAiYWN0dWFsX2hhc2hfYWxnb3JpdGhtIjogImZpbGUtc2hhMjU2IgogICAgICB9CiAgICB9LAogICAgewogICAgICAibmFtZSI6ICJ0b2tlbml6ZXJfY29uZmlnLmpzb24iLAogICAgICAiZGlnZXN0IjogewogICAgICAgICJzaGEyNTYiOiAiMDc2NGQzYWUzODMwMTg3ZjYzY2ZlNTY4Yzc1NGQ5OTkwMGZlZDg1ZmM5ZDA3MWU2Y2ZlMmFkZDlmNTU1YjZiYiIKICAgICAgfSwKICAgICAgImFubm90YXRpb25zIjogewogICAgICAgICJhY3R1YWxfaGFzaF9hbGdvcml0aG0iOiAiZmlsZS1zaGEyNTYiCiAgICAgIH0KICAgIH0KICBdLAogICJwcmVkaWNhdGVUeXBlIjogImh0dHBzOi8vbW9kZWxfc2lnbmluZy9zaWduYXR1cmUvdjEuMCIsCiAgInByZWRpY2F0ZSI6IHsKICAgICJ1bnVzZWQiOiAiVW51c2VkLCBqdXN0IHBhc3NlZCBkdWUgdG8gQVBJIHJlcXVpcmVtZW50cyIKICB9Cn0=",
     "payloadType": "application/vnd.in-toto+json",
     "signatures": [
       {
@@ -132,99 +168,41 @@ $ cat model.sig | jq .dsseEnvelope.payload -r | base64 -d | jq .
   "_type": "https://in-toto.io/Statement/v1",
   "subject": [
     {
-      "name": ".gitattributes",
+      "name": "sample_model",
       "digest": {
-        "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "README.md",
-      "digest": {
-        "sha256": "fa166922cca62cd8acdd54d1964abe91d1b58cfb9afd6e4c599cb09912d9a9f9"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "config.json",
-      "digest": {
-        "sha256": "bdc265c2e79f1c6b6c0f4f25313e0d1cc936e0fd4e1e082bb26f65a4bd0fa557"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "generation_config.json",
-      "digest": {
-        "sha256": "e53a4633c99233a65025b869b1e0fc5747a737d39d57f6a40a78a64a570d3628"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "model-00001-of-00002.safetensors",
-      "digest": {
-        "sha256": "7127432f1ffff5b25875ce4e287c9dfa458655ad1b6183a2d274c061bf9e4b1b"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "model-00002-of-00002.safetensors",
-      "digest": {
-        "sha256": "344a03bb26fe17bacac63b616c45397758aeb6dfb0f36b4495139dc4530b885b"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "model.safetensors.index.json",
-      "digest": {
-        "sha256": "bcd1ac27ce8c784f682a702e0499bc9e4e73c2200bd34d2ced2fe2ce17a1132b"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "special_tokens_map.json",
-      "digest": {
-        "sha256": "2f2bba45146f073a7b8a097cb6133a6b4b66d5751e73f2a2aca81083288813e9"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "tokenizer.json",
-      "digest": {
-        "sha256": "9af07a3123a1f4d75dcb85fbdc4c62f9b7873d23fa39c449d2240c3e33eb3ab5"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
-      }
-    },
-    {
-      "name": "tokenizer_config.json",
-      "digest": {
-        "sha256": "0764d3ae3830187f63cfe568c754d99900fed85fc9d071e6cfe2add9f555b6bb"
-      },
-      "annotations": {
-        "actual_hash_algorithm": "file-sha256"
+        "sha256": "143cc6..."
       }
     }
   ],
-  "predicateType": "https://model_signing/Digests/v0.1",
+  "predicateType": "https://model_signing/signature/v1.0",
   "predicate": {
-    "unused": "Unused, just passed due to API requirements"
+    "serialization": {
+      "method": "files",
+      "hash_type": "sha256",
+      "allow_symlinks": true
+    },
+    "resources": [
+      {
+        "name": "config.json",
+        "algorithm": "sha256",
+        "digest": "bdc265..."
+      },
+      {
+        "name": "model-00001-of-00002.safetensors",
+        "algorithm": "sha256",
+        "digest": "712743..."
+      },
+      {
+        "name": "model-00002-of-00002.safetensors",
+        "algorithm": "sha256",
+        "digest": "344a03..."
+      },
+      {
+        "name": "tokenizer.json",
+        "algorithm": "sha256",
+        "digest": "9af07a..."
+      }
+    ]
   }
 }
 ```
